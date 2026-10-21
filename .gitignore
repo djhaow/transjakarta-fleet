@@ -1,0 +1,15 @@
+# Binaries
+/bin/
+*.exe
+
+# Local environment overrides
+.env
+
+# Go test artifacts
+*.test
+*.out
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store

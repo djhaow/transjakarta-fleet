@@ -1,0 +1,111 @@
+name: transjakarta-fleet
+
+services:
+  # ------------------------------------------------------------- PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fleet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleet}
+      POSTGRES_DB: ${POSTGRES_DB:-fleet}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fleet} -d ${POSTGRES_DB:-fleet}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # --------------------------------------------------------------- RabbitMQ
+  # The "guest" user cannot connect from another container (RabbitMQ
+  # loopback-users restriction), so a dedicated user is created instead.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-fleet}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-fleet123}
+    ports:
+      - "5672:5672"
+      - "15672:15672" # management UI: http://localhost:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # -------------------------------------------------- MQTT broker (Mosquitto)
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok -q 1 > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ----------------------------------------------------- Backend (Go binary)
+  backend:
+    build: .
+    command: ["server"]
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_PORT: "8080"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-fleet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleet}
+      POSTGRES_DB: ${POSTGRES_DB:-fleet}
+      MQTT_BROKER: tcp://mosquitto:1883
+      MQTT_CLIENT_ID: fleet-backend
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-fleet}:${RABBITMQ_DEFAULT_PASS:-fleet123}@rabbitmq:5672/"
+      GEOFENCE_LAT: "-6.2088"
+      GEOFENCE_LON: "106.8456"
+      GEOFENCE_RADIUS_M: "50"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ------------------------------------------------ Worker (geofence alerts)
+  worker:
+    build: .
+    command: ["worker"]
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-fleet}:${RABBITMQ_DEFAULT_PASS:-fleet123}@rabbitmq:5672/"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --------------------------------- Mock GPS publisher (demo profile only)
+  # Started with: docker compose --profile demo up -d
+  mock-publisher:
+    build: .
+    command: ["mock-publisher", "-interval", "2s"]
+    environment:
+      MQTT_BROKER: tcp://mosquitto:1883
+      GEOFENCE_LAT: "-6.2088"
+      GEOFENCE_LON: "106.8456"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    profiles: ["demo"]
+
+volumes:
+  postgres-data:

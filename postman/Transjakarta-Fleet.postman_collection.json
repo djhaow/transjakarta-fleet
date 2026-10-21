@@ -1,0 +1,216 @@
+{
+	"info": {
+		"_postman_id": "b7a1f2c3-4d5e-6f70-8a9b-0c1d2e3f4a5b",
+		"name": "Transjakarta Fleet Management API",
+		"description": "Collection untuk menguji API Sistem Manajemen Armada Transjakarta.\n\nSebelum menjalankan collection: nyalakan stack dengan `docker compose --profile demo up -d --build` agar ada data lokasi masuk.\n\nVariabel `start` dan `end` diisi otomatis oleh pre-request script (rentang 60 menit terakhir).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/healthz",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"healthz"
+					]
+				},
+				"description": "Memastikan backend hidup."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+							"pm.test(\"body status ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Latest Vehicle Location",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/vehicles/{{vehicle_id}}/location",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"vehicles",
+						"{{vehicle_id}}",
+						"location"
+					]
+				},
+				"description": "Mendapatkan lokasi terakhir kendaraan. Mengembalikan 404 jika kendaraan belum pernah mengirim data."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+							"pm.test(\"shape sesuai spesifikasi\", () => {",
+							"    const body = pm.response.json();",
+							"    pm.expect(body).to.have.property(\"vehicle_id\");",
+							"    pm.expect(body).to.have.property(\"latitude\");",
+							"    pm.expect(body).to.have.property(\"longitude\");",
+							"    pm.expect(body).to.have.property(\"timestamp\");",
+							"});"
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Vehicle Location History",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/vehicles/{{vehicle_id}}/history?start={{start}}&end={{end}}&limit=100",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"vehicles",
+						"{{vehicle_id}}",
+						"history"
+					],
+					"query": [
+						{
+							"key": "start",
+							"value": "{{start}}",
+							"description": "unix seconds, inklusif (diisi otomatis oleh pre-request script)"
+						},
+						{
+							"key": "end",
+							"value": "{{end}}",
+							"description": "unix seconds, inklusif (diisi otomatis oleh pre-request script)"
+						},
+						{
+							"key": "limit",
+							"value": "100",
+							"description": "opsional, default 500, maksimum 1000"
+						}
+					]
+				},
+				"description": "Riwayat lokasi kendaraan dalam rentang waktu tertentu.\n\nContoh manual: ?start=1715000000&end=1715009999"
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+							"pm.test(\"locations adalah array\", () => {",
+							"    const body = pm.response.json();",
+							"    pm.expect(body.locations).to.be.an(\"array\");",
+							"    pm.expect(body.count).to.eql(body.locations.length);",
+							"});"
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "History - Invalid Range (start >= end)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/vehicles/{{vehicle_id}}/history?start=200&end=100",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"vehicles",
+						"{{vehicle_id}}",
+						"history"
+					],
+					"query": [
+						{
+							"key": "start",
+							"value": "200"
+						},
+						{
+							"key": "end",
+							"value": "100"
+						}
+					]
+				},
+				"description": "Validasi rentang waktu: harus 400."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Latest Location - Unknown Vehicle (404)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/vehicles/NOTEXIST999/location",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"vehicles",
+						"NOTEXIST999",
+						"location"
+					]
+				},
+				"description": "Kendaraan yang belum pernah melapor harus 404."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+						]
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Default window: last 60 minutes, so history returns data right away.",
+					"pm.collectionVariables.set('start', Math.floor(Date.now() / 1000) - 3600);",
+					"pm.collectionVariables.set('end', Math.floor(Date.now() / 1000));"
+				]
+			}
+		}
+	]
+}
