@@ -6,18 +6,54 @@ API, and publishes geofence entry events through RabbitMQ.
 
 ## Architecture
 
-    mock-publisher -> Mosquitto (MQTT) -> server -> RabbitMQ -> worker
-                                             |
-                                         PostgreSQL
-                                             |
-                                         REST API (:8080)
+    GPS tracker (mock-publisher)
+        |
+        | MQTT /fleet/vehicle/{vehicle_id}/location (QoS 1)
+        v
+    Mosquitto :1883
+        |
+        v
+    server (cmd/server)
+        |--> validate + store --> PostgreSQL (vehicle_locations)
+        |--> geofence check (Haversine, radius 50 m)
+        |         |
+        |         | on an outside -> inside transition
+        |         v
+        |    RabbitMQ exchange fleet.events -> queue geofence_alerts
+        |                                           |
+        |                                           v
+        |                                      worker (cmd/worker)
+        v
+    REST API :8080 (GET /vehicles/{id}/location, /history)
 
-- `cmd/server` subscribes to `/fleet/vehicle/+/location` (QoS 1), validates
-  and stores every location, detects geofence entries and publishes a
-  `geofence_entry` event to the `fleet.events` exchange.
-- `cmd/worker` consumes the `geofence_alerts` queue and logs each event.
-- `cmd/mock-publisher` simulates a GPS tracker on a north-south route that
-  passes through the geofence center.
+Locations are pushed by the trackers and pulled once by the backend; the
+REST API reads PostgreSQL only and never touches MQTT or RabbitMQ.
+
+### Data flow
+
+1. A tracker publishes a JSON location to `/fleet/vehicle/{vehicle_id}/location`.
+2. `server` takes the vehicle id from the topic, validates the payload
+   (required fields, coordinate ranges, timestamp skew) and stores the fix.
+3. The same message runs through the geofence tracker: Haversine distance
+   against the configured center. Only an outside -> inside transition
+   publishes a `geofence_entry` event to the `fleet.events` exchange, so a
+   vehicle parked inside the fence does not spam alerts.
+4. `worker` consumes the `geofence_alerts` queue, logs the event and acks it.
+5. Clients read the latest location and the history straight from PostgreSQL.
+
+### Layout
+
+    cmd/server           MQTT subscriber, geofence publisher, REST API
+    cmd/worker           geofence_alerts consumer
+    cmd/mock-publisher   GPS simulator, publishes every 2 s
+    internal/config      environment and .env loading, all values defaulted
+    internal/mqtt        subscriber, topic parsing, background reconnect
+    internal/model       payload contract and validation
+    internal/database    pgx pool, schema, location queries
+    internal/geofence    Haversine distance, entry transition tracking
+    internal/rabbitmq    event contract, publisher, consumer
+    internal/service     ingest pipeline wiring
+    internal/api         gin routes and parameter handling
 
 ## Running
 
