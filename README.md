@@ -16,13 +16,13 @@ API, and publishes geofence entry events through RabbitMQ.
     server (cmd/server)
         |--> validate + store --> PostgreSQL (vehicle_locations)
         |--> geofence check (Haversine, radius 50 m)
-        |         |
-        |         | on an outside -> inside transition
-        |         v
-        |    RabbitMQ exchange fleet.events -> queue geofence_alerts
-        |                                           |
-        |                                           v
-        |                                      worker (cmd/worker)
+                 |
+                 | on an outside -> inside transition
+                 v
+            RabbitMQ exchange fleet.events -> queue geofence_alerts
+                                               |
+                                               v
+                                          worker (cmd/worker)
         v
     REST API :8080 (GET /vehicles/{id}/location, /history)
 
@@ -54,7 +54,6 @@ REST API reads PostgreSQL only and never touches MQTT or RabbitMQ.
     internal/rabbitmq    event contract, publisher, consumer
     internal/service     ingest pipeline wiring
     internal/api         gin routes and parameter handling
-
 ## Running
 
 Requires Docker.
